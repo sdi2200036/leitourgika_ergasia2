@@ -119,6 +119,11 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(sched_compute_energy_tp);
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
+#ifdef CONFIG_GRR_SCHED
+int grr_cpu_group[NR_CPUS];
+extern void init_grr_rq(struct grr_rq *grr_rq);
+#endif
+
 #ifdef CONFIG_SCHED_DEBUG
 /*
  * Debugging: various feature bits
@@ -5631,6 +5636,78 @@ static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
  * This function gets called by the timer code, with HZ frequency.
  * We call it with interrupts disabled.
  */
+
+/*ADDED THESE HELPER FUNCTIONS HERE INSTEAD OF GRR.C*/
+#ifdef CONFIG_GRR_SCHED
+/* Helper to find the busiest CPU in a specific group */
+static int find_busiest_grr_cpu(int group_id, int current_cpu)
+{
+    int cpu;
+    int max_load = -1;
+    int busiest_cpu = -1;
+
+    for_each_online_cpu(cpu) {
+        /* Only look at CPUs in the same group */
+        if (grr_cpu_group[cpu] == group_id && cpu != current_cpu) {
+            int load = cpu_rq(cpu)->grr.nr_running;
+            if (load > max_load) {
+                max_load = load;
+                busiest_cpu = cpu;
+            }
+        }
+    }
+    return busiest_cpu;
+}
+
+void grr_load_balance(struct rq *this_rq)
+{
+    int this_cpu = cpu_of(this_rq);
+    int group = grr_cpu_group[this_cpu];
+    
+    /* 1. Am I idle? (Optimization: only steal if I have nothing to do) */
+    /* Note: You can remove this check if you want aggressive balancing */
+    if (this_rq->grr.nr_running > 0) 
+        return;
+
+    /* 2. Find busiest CPU in my group */
+    int busiest_cpu = find_busiest_grr_cpu(group, this_cpu);
+    
+    /* 3. Steal a task if found and it has tasks to spare */
+    if (busiest_cpu != -1) {
+        struct rq *busiest_rq = cpu_rq(busiest_cpu);
+        
+        /* * CRITICAL: Locking Order 
+         * You must lock both queues to move a task safely.
+         * double_rq_lock handles the ordering to prevent deadlocks.
+         */
+        double_rq_lock(this_rq, busiest_rq);
+        
+        /* Check again after locking (state might have changed) */
+        if (busiest_rq->grr.nr_running > 1) {
+            
+            /* Get the task from the back (or front) of the busiest queue */
+            /* We need to access the list directly. */
+            struct task_struct *p;
+            
+            if (!list_empty(&busiest_rq->grr.queue)) {
+                /* Pick last task (simple strategy) */
+                p = list_last_entry(&busiest_rq->grr.queue, struct task_struct, grr_list);
+                
+                /* Move the task */
+                deactivate_task(busiest_rq, p, 0);
+                set_task_cpu(p, this_cpu);
+                activate_task(this_rq, p, 0);
+                
+                /* Optional: Print for debugging */
+                // printk(KERN_INFO "GRR: Migrated pid %d from CPU%d to CPU%d\n", p->pid, busiest_cpu, this_cpu);
+            }
+        }
+        
+        double_rq_unlock(this_rq, busiest_rq);
+    }
+}
+#endif
+
 void sched_tick(void)
 {
 	int cpu = smp_processor_id();
@@ -5682,6 +5759,19 @@ void sched_tick(void)
 		sched_balance_trigger(rq);
 	}
 #endif
+
+#ifdef CONFIG_GRR_SCHED
+    /* Check if 500ms have passed */
+    if ((jiffies % msecs_to_jiffies(500)) == 0) {
+        
+        /* You must define this function helper in core.c or grr.c */
+        extern void grr_load_balance(struct rq *rq); 
+        
+        /* Call balancer */
+        grr_load_balance(rq);
+    }
+#endif
+
 }
 
 #ifdef CONFIG_NO_HZ_FULL
@@ -7107,7 +7197,12 @@ const struct sched_class *__setscheduler_class(int policy, int prio)
 
 	if (rt_prio(prio))
 		return &rt_sched_class;
-
+/*ADDED THIS*/
+#ifdef CONFIG_GRR_SCHED
+    if (policy == SCHED_GRR)
+        return &grr_sched_class;
+#endif	
+	
 #ifdef CONFIG_SCHED_CLASS_EXT
 	if (task_should_scx(policy))
 		return &ext_sched_class;
@@ -8577,6 +8672,11 @@ void __init sched_init(void)
 		 */
 		init_tg_cfs_entry(&root_task_group, &rq->cfs, NULL, i, NULL);
 #endif /* CONFIG_FAIR_GROUP_SCHED */
+
+#ifdef CONFIG_GRR_SCHED
+    init_grr_rq(&rq->grr);
+    grr_cpu_group[i] = (i < num_possible_cpus()/2) ? 1 : 2;
+#endif
 
 #ifdef CONFIG_RT_GROUP_SCHED
 		/*
@@ -10696,3 +10796,90 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx)
 		set_next_task(rq, ctx->p);
 }
 #endif	/* CONFIG_SCHED_CLASS_EXT */
+
+#ifdef CONFIG_GRR_SCHED
+
+/* Helper to move tasks from a CPU that is changing groups */
+static void evict_grr_tasks(int cpu, int old_group) {
+    struct rq *rq = cpu_rq(cpu);
+    struct task_struct *p, *n;
+    struct grr_rq *grr = &rq->grr;
+    struct rq_flags rf;
+
+    rq_lock(rq, &rf);
+    /* Safely iterate and move tasks */
+    list_for_each_entry_safe(p, n, &grr->queue, grr_list) {
+        /* Task belongs to old_group, but CPU is now new_group. Move task. */
+        int dest_cpu = select_task_rq_grr(p, cpu, 0);
+        if (dest_cpu != cpu) {
+            deactivate_task(rq, p, 0);
+            set_task_cpu(p, dest_cpu);
+            activate_task(cpu_rq(dest_cpu), p, 0);
+        }
+    }
+    rq_unlock(rq, &rf);
+}
+
+SYSCALL_DEFINE2(sched_assign_ncores_to_group, int, ncores, int, group)
+{
+    int cpu;
+    int assigned = 0;
+    int target_group = group;
+    int other_group = (group == GRR_DEFAULT) ? GRR_PERFORMANCE : GRR_DEFAULT;
+
+    if (!capable(CAP_SYS_ADMIN)) return -EPERM;
+    if (ncores <= 0 || ncores >= num_online_cpus()) return -EINVAL;
+
+    cpus_read_lock();
+    for_each_online_cpu(cpu) {
+        int old_group = grr_cpu_group[cpu];
+        int new_group;
+
+        if (assigned < ncores) {
+            new_group = target_group;
+            assigned++;
+        } else {
+            new_group = other_group;
+        }
+
+        if (old_group != new_group) {
+            grr_cpu_group[cpu] = new_group;
+            evict_grr_tasks(cpu, old_group);
+        }
+    }
+    cpus_read_unlock();
+    return 0;
+}
+
+SYSCALL_DEFINE2(sched_assign_process_to_group, pid_t, pid, int, group)
+{
+    struct task_struct *p;
+    struct rq *rq;
+    unsigned long flags;
+    int ret = 0;
+
+    if (!capable(CAP_SYS_ADMIN)) return -EPERM;
+    if (group != GRR_DEFAULT && group != GRR_PERFORMANCE) return -EINVAL;
+
+    p = find_process_by_pid(pid); /* Helper needed or find_task_by_vpid + rcu_lock */
+    if (!p) return -ESRCH;
+
+    rq = task_rq_lock(p, &flags);
+    if (p->policy == SCHED_GRR) {
+        p->grr_group = group;
+        /* If task is currently on a CPU that doesn't match the new group, move it */
+        if (task_on_rq_queued(p) && grr_cpu_group[task_cpu(p)] != group) {
+             int new_cpu = select_task_rq_grr(p, task_cpu(p), 0);
+             if (new_cpu != task_cpu(p)) {
+                 deactivate_task(rq, p, 0);
+                 set_task_cpu(p, new_cpu);
+                 activate_task(cpu_rq(new_cpu), p, 0);
+             }
+        }
+    } else {
+        ret = -EINVAL;
+    }
+    task_rq_unlock(rq, p, &flags);
+    return ret;
+}
+#endif

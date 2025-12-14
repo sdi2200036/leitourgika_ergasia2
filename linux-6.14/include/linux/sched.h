@@ -1619,6 +1619,12 @@ struct task_struct {
 	struct user_event_mm		*user_event_mm;
 #endif
 
+#ifdef CONFIG_GRR_SCHED
+    int grr_group;               /* 1 = Default, 2 = Performance */
+    unsigned int grr_time_slice; /* Remaining ticks (10ms units) */
+    struct list_head grr_list;   /* Runqueue list node */
+#endif
+
 	/*
 	 * New fields for task_struct should be added above here, so that
 	 * they are included in the randomized portion of task_struct.

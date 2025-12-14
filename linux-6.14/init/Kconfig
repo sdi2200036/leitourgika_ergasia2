@@ -2079,3 +2079,10 @@ config ARCH_HAS_SYNC_CORE_BEFORE_USERMODE
 # <asm/syscall_wrapper.h>.
 config ARCH_HAS_SYSCALL_WRAPPER
 	def_bool n
+
+config GRR_SCHED
+    bool "Group Round-Robin Scheduler Class"
+    default y
+    help
+      This option enables the Group Round-Robin (GRR) scheduler,
+      operating alongside CFS and RT policies.
