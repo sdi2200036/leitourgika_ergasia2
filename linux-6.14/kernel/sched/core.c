@@ -5637,77 +5637,6 @@ static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
  * We call it with interrupts disabled.
  */
 
-/*ADDED THESE HELPER FUNCTIONS HERE INSTEAD OF GRR.C*/
-#ifdef CONFIG_GRR_SCHED
-/* Helper to find the busiest CPU in a specific group */
-static int find_busiest_grr_cpu(int group_id, int current_cpu)
-{
-    int cpu;
-    int max_load = -1;
-    int busiest_cpu = -1;
-
-    for_each_online_cpu(cpu) {
-        /* Only look at CPUs in the same group */
-        if (grr_cpu_group[cpu] == group_id && cpu != current_cpu) {
-            int load = cpu_rq(cpu)->grr.nr_running;
-            if (load > max_load) {
-                max_load = load;
-                busiest_cpu = cpu;
-            }
-        }
-    }
-    return busiest_cpu;
-}
-
-void grr_load_balance(struct rq *this_rq)
-{
-    int this_cpu = cpu_of(this_rq);
-    int group = grr_cpu_group[this_cpu];
-    
-    /* 1. Am I idle? (Optimization: only steal if I have nothing to do) */
-    /* Note: You can remove this check if you want aggressive balancing */
-    if (this_rq->grr.nr_running > 0) 
-        return;
-
-    /* 2. Find busiest CPU in my group */
-    int busiest_cpu = find_busiest_grr_cpu(group, this_cpu);
-    
-    /* 3. Steal a task if found and it has tasks to spare */
-    if (busiest_cpu != -1) {
-        struct rq *busiest_rq = cpu_rq(busiest_cpu);
-        
-        /* * CRITICAL: Locking Order 
-         * You must lock both queues to move a task safely.
-         * double_rq_lock handles the ordering to prevent deadlocks.
-         */
-        double_rq_lock(this_rq, busiest_rq);
-        
-        /* Check again after locking (state might have changed) */
-        if (busiest_rq->grr.nr_running > 1) {
-            
-            /* Get the task from the back (or front) of the busiest queue */
-            /* We need to access the list directly. */
-            struct task_struct *p;
-            
-            if (!list_empty(&busiest_rq->grr.queue)) {
-                /* Pick last task (simple strategy) */
-                p = list_last_entry(&busiest_rq->grr.queue, struct task_struct, grr_list);
-                
-                /* Move the task */
-                deactivate_task(busiest_rq, p, 0);
-                set_task_cpu(p, this_cpu);
-                activate_task(this_rq, p, 0);
-                
-                /* Optional: Print for debugging */
-                // printk(KERN_INFO "GRR: Migrated pid %d from CPU%d to CPU%d\n", p->pid, busiest_cpu, this_cpu);
-            }
-        }
-        
-        double_rq_unlock(this_rq, busiest_rq);
-    }
-}
-#endif
-
 void sched_tick(void)
 {
 	int cpu = smp_processor_id();
@@ -10799,26 +10728,116 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx)
 
 #ifdef CONFIG_GRR_SCHED
 
-/* Helper to move tasks from a CPU that is changing groups */
+/* --- 1. Load Balancer Implementation --- */
+
+/* Prototype to shut up the warning */
+void grr_load_balance(struct rq *this_rq);
+
+/* Helper to find busiest CPU */
+static int find_busiest_grr_cpu(int group_id, int current_cpu)
+{
+    int cpu;
+    int max_load = -1;
+    int busiest_cpu = -1;
+
+    for_each_online_cpu(cpu) {
+        if (grr_cpu_group[cpu] == group_id && cpu != current_cpu) {
+            int load = cpu_rq(cpu)->grr.nr_running;
+            if (load > max_load) {
+                max_load = load;
+                busiest_cpu = cpu;
+            }
+        }
+    }
+    return busiest_cpu;
+}
+
+void grr_load_balance(struct rq *this_rq)
+{
+    int this_cpu = cpu_of(this_rq);
+    int group = grr_cpu_group[this_cpu];
+    
+    /* Optimization: If I am busy, don't steal */
+    if (this_rq->grr.nr_running > 0) 
+        return;
+
+    int busiest_cpu = find_busiest_grr_cpu(group, this_cpu);
+    
+    if (busiest_cpu != -1) {
+        struct rq *busiest_rq = cpu_rq(busiest_cpu);
+        
+        /* CORRECT LOCKING: Uses double_rq_lock */
+        double_rq_lock(this_rq, busiest_rq);
+        
+        if (busiest_rq->grr.nr_running > 1) {
+            struct task_struct *p;
+            
+            if (!list_empty(&busiest_rq->grr.queue)) {
+                /* Steal from tail */
+                p = list_last_entry(&busiest_rq->grr.queue, struct task_struct, grr_list);
+                
+                deactivate_task(busiest_rq, p, 0);
+                set_task_cpu(p, this_cpu);
+                activate_task(this_rq, p, 0);
+            }
+        }
+        double_rq_unlock(this_rq, busiest_rq);
+    }
+}
+
+/* --- 2. Syscall Helper --- */
+
+/* DEADLOCK-PROOF & CRASH-PROOF EVICTION */
 static void evict_grr_tasks(int cpu, int old_group) {
     struct rq *rq = cpu_rq(cpu);
     struct task_struct *p, *n;
     struct grr_rq *grr = &rq->grr;
     struct rq_flags rf;
+    int dest_cpu;
 
+repeat:
     rq_lock(rq, &rf);
-    /* Safely iterate and move tasks */
+    
+    /* Iterate to find just ONE task that needs moving */
     list_for_each_entry_safe(p, n, &grr->queue, grr_list) {
-        /* Task belongs to old_group, but CPU is now new_group. Move task. */
-        int dest_cpu = select_task_rq_grr(p, cpu, 0);
+        
+        /* 1. SKIP RUNNING TASK (Crucial to prevent crash) */
+        if (task_current(rq, p))
+            continue;
+
+        dest_cpu = select_task_rq_grr(p, cpu, 0);
+        
+        /* 2. Found a task that is in the wrong place */
         if (dest_cpu != cpu) {
-            deactivate_task(rq, p, 0);
-            set_task_cpu(p, dest_cpu);
-            activate_task(cpu_rq(dest_cpu), p, 0);
+            
+            /* We found a candidate. We must drop the lock to move it safely. */
+            get_task_struct(p); /* Protect p from disappearing */
+            rq_unlock(rq, &rf);
+
+            /* 3. Perform the migration with DOUBLE LOCK (Thread-Safe) */
+            struct rq *dest_rq = cpu_rq(dest_cpu);
+            
+            double_rq_lock(rq, dest_rq);
+            
+            /* Verify p is STILL on the queue (state didn't change while unlocked) */
+            if (task_cpu(p) == cpu && task_on_rq_queued(p)) {
+                 deactivate_task(rq, p, 0);
+                 set_task_cpu(p, dest_cpu);
+                 activate_task(dest_rq, p, 0);
+            }
+            
+            double_rq_unlock(rq, dest_rq);
+            put_task_struct(p);
+            
+            /* 4. RESTART the search since we dropped the lock */
+            goto repeat;
         }
     }
+    
     rq_unlock(rq, &rf);
 }
+
+/* --- 3. Syscall Definitions --- */
 
 SYSCALL_DEFINE2(sched_assign_ncores_to_group, int, ncores, int, group)
 {
@@ -10829,6 +10848,7 @@ SYSCALL_DEFINE2(sched_assign_ncores_to_group, int, ncores, int, group)
 
     if (!capable(CAP_SYS_ADMIN)) return -EPERM;
     if (ncores <= 0 || ncores >= num_online_cpus()) return -EINVAL;
+    if (group != GRR_DEFAULT && group != GRR_PERFORMANCE) return -EINVAL;
 
     cpus_read_lock();
     for_each_online_cpu(cpu) {
@@ -10855,31 +10875,67 @@ SYSCALL_DEFINE2(sched_assign_process_to_group, pid_t, pid, int, group)
 {
     struct task_struct *p;
     struct rq *rq;
-    unsigned long flags;
+    struct rq_flags rf; /* FIXED: Correct type */
     int ret = 0;
 
     if (!capable(CAP_SYS_ADMIN)) return -EPERM;
     if (group != GRR_DEFAULT && group != GRR_PERFORMANCE) return -EINVAL;
 
-    p = find_process_by_pid(pid); /* Helper needed or find_task_by_vpid + rcu_lock */
+    /* FIXED: Correct way to look up a task */
+    rcu_read_lock();
+    p = find_task_by_vpid(pid);
+    if (p) get_task_struct(p);
+    rcu_read_unlock();
+
     if (!p) return -ESRCH;
 
-    rq = task_rq_lock(p, &flags);
+    /* FIXED: Using &rf (struct rq_flags) */
+    rq = task_rq_lock(p, &rf);
+    
     if (p->policy == SCHED_GRR) {
         p->grr_group = group;
-        /* If task is currently on a CPU that doesn't match the new group, move it */
+        
+        /* If task is queued on a CPU that doesn't match the new group, move it */
         if (task_on_rq_queued(p) && grr_cpu_group[task_cpu(p)] != group) {
+             
+             /* 1. SAFETY: If p is running, ask it to yield but DONT move it manually */
+             if (task_current(rq, p)) {
+                 resched_curr(rq);
+                 task_rq_unlock(rq, p, &rf);
+                 put_task_struct(p);
+                 return 0; 
+             }
+
              int new_cpu = select_task_rq_grr(p, task_cpu(p), 0);
+             
              if (new_cpu != task_cpu(p)) {
-                 deactivate_task(rq, p, 0);
-                 set_task_cpu(p, new_cpu);
-                 activate_task(cpu_rq(new_cpu), p, 0);
+                 /* 2. Unsafe to move while holding just one lock. Drop it. */
+                 task_rq_unlock(rq, p, &rf);
+                 
+                 /* 3. Take BOTH locks safely */
+                 struct rq *dest_rq = cpu_rq(new_cpu);
+                 double_rq_lock(rq, dest_rq);
+                 
+                 /* Check again after locking */
+                 if (task_cpu(p) == task_cpu(current) && task_on_rq_queued(p)) {
+                     deactivate_task(rq, p, 0);
+                     set_task_cpu(p, new_cpu);
+                     activate_task(dest_rq, p, 0);
+                 }
+                 
+                 double_rq_unlock(rq, dest_rq);
+                 put_task_struct(p);
+                 return ret;
              }
         }
     } else {
         ret = -EINVAL;
     }
-    task_rq_unlock(rq, p, &flags);
+    
+    /* FIXED: Using &rf */
+    task_rq_unlock(rq, p, &rf);
+    
+    put_task_struct(p);
     return ret;
 }
 #endif

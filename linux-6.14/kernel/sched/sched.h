@@ -2629,7 +2629,8 @@ static inline bool task_allowed_on_cpu(struct task_struct *p, int cpu)
 		return false;
 
 	/* Can @cpu run a user thread? */
-	if (!(p->flags & PF_KTHREAD) && !task_cpu_possible(cpu, p))
+	/*if (!(p->flags & PF_KTHREAD) && !task_cpu_possible(cpu, p))<--PREVIOUS IMPLEMENTATION*/
+	if (!(p->flags & PF_KTHREAD) && !cpu_possible(cpu))
 		return false;
 
 	return true;
@@ -4018,6 +4019,8 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx);
 #ifdef CONFIG_GRR_SCHED
 extern const struct sched_class grr_sched_class;
 extern int grr_cpu_group[NR_CPUS];
+extern int select_task_rq_grr(struct task_struct *p, int cpu, int flags);
+extern void grr_load_balance(struct rq *rq);
 #define GRR_DEFAULT 1
 #define GRR_PERFORMANCE 2
 #endif
