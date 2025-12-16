@@ -4,7 +4,7 @@
 #include <errno.h>
 
 #define SYS_ASSIGN_NCORES 467
-#define GRR_DEFAULT 1
+#define GRR_DEFAULT 0
 
 int main() {
     printf("Testing Syscall 467...\n");

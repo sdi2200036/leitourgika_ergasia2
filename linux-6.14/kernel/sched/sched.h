@@ -220,7 +220,7 @@ static inline int dl_policy(int policy)
 static inline bool valid_policy(int policy)
 {
 	return idle_policy(policy) || fair_policy(policy) ||
-		rt_policy(policy) || dl_policy(policy);
+		rt_policy(policy) || dl_policy(policy) || policy == SCHED_GRR;
 }
 
 static inline int task_has_idle_policy(struct task_struct *p)
@@ -4021,8 +4021,9 @@ extern const struct sched_class grr_sched_class;
 extern int grr_cpu_group[NR_CPUS];
 extern int select_task_rq_grr(struct task_struct *p, int cpu, int flags);
 extern void grr_load_balance(struct rq *rq);
-#define GRR_DEFAULT 1
-#define GRR_PERFORMANCE 2
+extern void init_grr_rq(struct grr_rq *grr_rq);
+#define GRR_DEFAULT 0
+#define GRR_PERFORMANCE 1
 #endif
 
 #endif /* _KERNEL_SCHED_SCHED_H */

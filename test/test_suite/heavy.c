@@ -6,8 +6,8 @@
 #include <pthread.h>
 
 #define REPS (1ULL << 31)
-#define GRR_DEFAULT 1
-#define GRR_PERFORMANCE 2
+#define GRR_DEFAULT 0
+#define GRR_PERFORMANCE 1
 #define __NR_assign_process_to_group 468
 
 pthread_mutex_t start_mtx = PTHREAD_MUTEX_INITIALIZER;

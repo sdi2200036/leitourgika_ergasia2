@@ -3,8 +3,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#define GRR_DEFAULT 1
-#define GRR_PERFORMANCE 2
+#define GRR_DEFAULT 0
+#define GRR_PERFORMANCE 1
 #define __NR_sched_assign_ncores_to_group 467
 
 int main(int argc, char *argv[])
