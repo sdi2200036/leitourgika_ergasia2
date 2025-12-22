@@ -94,7 +94,7 @@ struct cpuidle_state;
 #ifdef CONFIG_SCHED_DEBUG
 # define SCHED_WARN_ON(x)      WARN_ONCE(x, #x)
 #else
-# define SCHED_WARN_ON(x)      ({ (void)(x), 0; })
+# define SCHED_WARN_ON(x)      ({ (void)(x); 0; })
 #endif
 
 /* task_struct::on_rq states: */
@@ -333,6 +333,7 @@ static inline int dl_bandwidth_enabled(void)
 struct grr_rq {
     struct list_head queue;
     unsigned int nr_running;
+	unsigned long next_balance;
 };
 
 
@@ -1147,8 +1148,9 @@ struct rq {
 #endif
 
 #ifdef CONFIG_GRR_SCHED
-    struct grr_rq grr;
+struct grr_rq grr;
 #endif
+
 
 	struct sched_dl_entity	fair_server;
 
@@ -4015,14 +4017,19 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx);
 
 #include "ext.h"
 
+#ifdef CONFIG_GRR_SCHED
+int grr_balance(struct rq *rq, struct task_struct *prev, struct rq_flags *rf);
+#endif
+
 /* Declare external symbols needed by other files */
 #ifdef CONFIG_GRR_SCHED
 extern const struct sched_class grr_sched_class;
 extern int grr_cpu_group[NR_CPUS];
 extern int select_task_rq_grr(struct task_struct *p, int cpu, int flags);
 extern void grr_load_balance(struct rq *rq);
+extern void init_grr_rq(struct grr_rq *grr_rq);
 #define GRR_DEFAULT 1
 #define GRR_PERFORMANCE 2
 #endif
 
-#endif /* _KERNEL_SCHED_SCHED_H */
+#endif
