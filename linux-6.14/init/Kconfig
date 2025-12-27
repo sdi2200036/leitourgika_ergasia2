@@ -2081,8 +2081,12 @@ config ARCH_HAS_SYSCALL_WRAPPER
 	def_bool n
 
 config GRR_SCHED
-    bool "Group Round-Robin Scheduler Class"
-    default y
-    help
-      This option enables the Group Round-Robin (GRR) scheduler,
-      operating alongside CFS and RT policies.
+	bool "Group Round-Robin Scheduler Class"
+	default y
+	help
+	  This option enables the Group Round-Robin (GRR) scheduler,
+	  which operates alongside CFS and RT policies. The GRR scheduler
+	  divides CPU cores into two groups (DEFAULT and PERFORMANCE) and
+	  schedules tasks with a fixed 100ms time quantum within their group.
+	  This is useful for systems where different task groups need
+	  different levels of CPU resource allocation.

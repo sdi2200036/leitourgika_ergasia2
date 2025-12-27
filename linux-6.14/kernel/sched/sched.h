@@ -331,8 +331,8 @@ static inline int dl_bandwidth_enabled(void)
 
 /* Define the GRR specific runqueue structure */
 struct grr_rq {
-    struct list_head queue;
-    unsigned int nr_running;
+	struct list_head queue;
+	unsigned int nr_running;
 };
 
 
@@ -1147,7 +1147,7 @@ struct rq {
 #endif
 
 #ifdef CONFIG_GRR_SCHED
-    struct grr_rq grr;
+	struct grr_rq grr;
 #endif
 
 	struct sched_dl_entity	fair_server;
@@ -4021,6 +4021,7 @@ extern const struct sched_class grr_sched_class;
 extern int grr_cpu_group[NR_CPUS];
 extern int select_task_rq_grr(struct task_struct *p, int cpu, int flags);
 extern void grr_load_balance(struct rq *rq);
+extern void init_grr_rq(struct grr_rq *grr_rq);
 #define GRR_DEFAULT 1
 #define GRR_PERFORMANCE 2
 #endif
