@@ -1,0 +1,91 @@
+# 2η Προγραμματιστική εργασία Λειτουργικών
+
+## Team: Merge request
+
+---
+
+## 1. ΣΤΟΙΧΕΙΑ ΟΜΑΔΑΣ
+
+- **ΧΟΛΕΒΑΣ ΔΗΜΗΤΡΙΟΣ** — Α.Μ.: 1115202100216
+- **ΚΟΚΚΑΛΗ ΕΛΛΗ** — Α.Μ.: 1115202100062
+- **ΓΙΩΡΓΟΣ ΔΕΛΓΑΣ** — Α.Μ.: 1115202200036
+
+---
+
+## 2. ΠΕΡΙΕΧΟΜΕΝΑ ΥΠΟΒΟΛΗΣ
+
+Το zip περιλαμβάνει:
+
+- `hmwk2.patch` — όλες οι αλλαγές στον Linux kernel
+- `checkpatch.txt` — output του checkpatch.pl πάνω στο patch
+- `README.md` — αυτό το αρχείο με τις λεπτομέριες της εργασίας
+
+---
+
+## 3. CORES ΠΟΥ ΧΡΗΣΙΜΟΠΟΙΗΘΗΚΑΝ
+
+Σε αυτή την εργασία χρησιμοποιήθηκαν 4 cores.
+
+---
+
+## 4. ΠΑΝΤΗΣΕΙΣ ΕΡΩΤΗΣΕΩΝ Q1–Q4
+
+### Q1: Verify sched_assign_process_to_group Implementation
+
+**Ερώτηση:** Observe how our code in heavy.c synchronizes all the threads to wait for their process to be assigned to one group or the other via the system call assign_process_to_group. Does your implementation assign_process_to_group work correctly, given the results you get from running our test suite?
+
+**Απάντηση:** Όχι, η υλοποίηση δεν λειτουργεί σωστά όσον αφορά την απόδοση. Παρόλο που η κλήση συστήματος φαίνεται να εκτελείται χωρίς σφάλματα, τα αποτελέσματα είναι απογοητευτικά και αποδεικνύουν αποτυχία του μηχανισμού. Η ομάδα GRR_PERFORMANCE σημείωσε χρόνο εκτέλεσης περίπου 11.4 δευτερόλεπτα, ο οποίος ήταν χειρότερος από αυτόν της ομάδας GRR_DEFAULT που ήταν περίπου 11.1 δευτερόλεπτα. Αυτό είναι το ακριβώς αντίθετο από το προσδοκώμενο αποτέλεσμα.
+
+Το πρόβλημα δεν έγκειται στη σύγχρονιση των threads (που φαίνεται να λειτουργεί σωστά μέσω του condition variable), αλλά στο γεγονός ότι τα threads που έχουν μετατραπεί σε SCHED_GRR δεν πραγματοποιούν πράγματι ταχύτερη εκτέλεση. Τα threads δεν εκμεταλλεύονται τους αποκλειστικούς πόρους που τους ανατέθησαν για να τρέξουν γρηγορότερα.
+
+---
+
+### Q2: Verify sched_assign_ncores_to_group Implementation
+
+**Ερώτηση:** Observe how our script uses the system call assign_ncores_to_group to change the CPU core allocation among the two groups. Does your implementation of assign_ncores_to_group work correctly, given the results you get from using our test suite?
+
+**Απάντηση:** Η υλοποίηση λειτουργεί μερικώς από άποψη περιορισμού, αλλά όχι σωστά ως προς το τελικό αποτέλεσμα απόδοσης. Θετικό στοιχείο είναι ότι τα logs αναφέρουν "Daemons are running on cpus: 0, 1", το οποίο δείχνει ότι οι διεργασίες παρασκηνίου περιορίστηκαν επιτυχώς στους 2 πρώτους πυρήνες, σεβόμενες την κατανομή που ορίστηκε.
+
+Ωστόσο, το γεγονός ότι η ομάδα Performance δεν είδε κανέναν υψηλό χρόνο εκτέλεσης (ή καν χειρότερη) υποδηλώνει ότι η κατανομή των υπόλοιπων πυρήνων στην ομάδα Performance δεν αξιοποιήθηκε σωστά από τον χρονοπρογραμματιστή. Η σκοπός της syscall επιτυγχάνεται μόνο εν μέρει.
+
+---
+
+### Q3: Performance Difference Between Groups
+
+**Ερώτηση:** Do you see when the runtime experience of the threads belonging to the GRR_PERFORMANCE group remains superior to this of the ones belonging to the GRR_DEFAULT group?
+
+**Απάντηση:** Όχι, δεν παρατηρείται καμία υπεροχή της ομάδας Performance. Αντιθέτως, στα tests που εκτελέστηκαν, η εμπειρία της ομάδας Performance ήταν σαφώς κατώτερη σε σχέση με την ομάδα Default. Συγκεκριμένα:
+
+- Ομάδα DEFAULT: 11.142s και 11.187s
+- Ομάδα PERFORMANCE: 11.382s και 11.562s
+
+Τα threads της ομάδας PERFORMANCE ήταν περίπου 0.3 έως 0.4 δευτερόλεπτα πιο αργά από τα threads της ομάδας DEFAULT. Αυτό είναι ακριβώς το αντίθετο από το επιθυμητό αποτέλεσμα, όπου η ομάδα PERFORMANCE θα έπρεπε να είναι τουλάχιστον 4-5 φορές ταχύτερη όταν έχει πολλαπλάσιες υπολογιστικές πηγές.
+
+Αυτό αποδεικνύει ότι ο μηχανισμός GRR δεν λειτουργεί σωστά και δεν παρέχει ουσιαστική προτεραιότητα ή απομόνωση στην ομάδα Performance.
+
+---
+
+### Q4: Load Balancing of Daemon Processes
+
+**Ερώτηση:** Do you see the load balancing of the daemon processes taking place when the number of CPU cores allocated to their group is increased?
+
+**Απάντηση:** Ναι, παρατηρείται load balancing εντός της ομάδας των daemons. Το μήνυμα "Daemons are running on cpus: 0, 1" επιβεβαιώνει ότι οι διεργασίες αυτές μοιράστηκαν στους δύο διαθέσιμους πυρήνες που τους ανατέθησαν, αντί να συνωστιστούν μόνο σε έναν πυρήνα (π.χ. μόνο τον 0). Αυτό δείχνει ότι ο μηχανισμός κατανομής φορτίου εντός της ομάδας DEFAULT λειτούργησε σωστά.
+
+Ωστόσο, αυτό δεν επηρέασε θετικά την συνολική απόδοση του συστήματος, διότι τα threads της ομάδας Performance εξακολουθούν να είναι αργά. Η κατανομή φορτίου των daemon processes λειτούργησε, αλλά ο στόχος του GRR scheduler (σημαντική διαφορά απόδοσης μεταξύ των ομάδων) δεν επιτεύχθη.
+
+---
+
+## 5. ΑΠΟΤΕΛΕΣΜΑΤΑ ΔΟΚΙΜΩΝ
+
+### Test Run Output
+
+```
+========== GRR DEFAULT GROUP CPUS: 2 | GRR PERFORMANCE GROUP CPUS: 2 ==========
+Daemons are running on cpus: 0, 1
+========== DEFAULT ==========
+Time: 11.142s
+Time: 11.187s
+========== PERFORMANCE ==========
+Time: 11.382s
+Time: 11.562s
+```
