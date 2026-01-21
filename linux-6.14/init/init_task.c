@@ -75,7 +75,12 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 	.prio		= MAX_PRIO - 20,
 	.static_prio	= MAX_PRIO - 20,
 	.normal_prio	= MAX_PRIO - 20,
-	.policy		= SCHED_NORMAL,
+	.policy		= SCHED_GRR,       /* Was SCHED_NORMAL */
+#ifdef CONFIG_GRR_SCHED
+	.grr_group	= 1,		/* GRR_DEFAULT */
+	.grr_time_slice	= 10,		/* 100ms equivalent (assuming HZ=100) */
+	.grr_list	= LIST_HEAD_INIT(init_task.grr_list),
+#endif
 	.cpus_ptr	= &init_task.cpus_mask,
 	.user_cpus_ptr	= NULL,
 	.cpus_mask	= CPU_MASK_ALL,

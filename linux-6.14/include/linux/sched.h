@@ -153,7 +153,7 @@ struct user_event_mm;
  */
 #define is_special_task_state(state)					\
 	((state) & (__TASK_STOPPED | __TASK_TRACED | TASK_PARKED |	\
-		    TASK_DEAD | TASK_FROZEN))
+			TASK_DEAD | TASK_FROZEN))
 
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 # define debug_normal_state_change(state_value)				\
@@ -1619,6 +1619,12 @@ struct task_struct {
 	struct user_event_mm		*user_event_mm;
 #endif
 
+#ifdef CONFIG_GRR_SCHED
+	int grr_group;		/* 1 = Default, 2 = Performance */
+	unsigned int grr_time_slice;	/* Remaining ticks (10ms units) */
+	struct list_head grr_list;	/* Runqueue list node */
+#endif
+
 	/*
 	 * New fields for task_struct should be added above here, so that
 	 * they are included in the randomized portion of task_struct.
@@ -1640,7 +1646,7 @@ struct task_struct {
 #define TASK_REPORT_MAX		(TASK_REPORT_IDLE << 1)
 
 static inline unsigned int __task_state_index(unsigned int tsk_state,
-					      unsigned int tsk_exit_state)
+						  unsigned int tsk_exit_state)
 {
 	unsigned int state = (tsk_state | tsk_exit_state) & TASK_REPORT;
 

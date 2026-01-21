@@ -329,6 +329,13 @@ static inline int dl_bandwidth_enabled(void)
 	return sysctl_sched_rt_runtime >= 0;
 }
 
+/* Define the GRR specific runqueue structure */
+struct grr_rq {
+	struct list_head queue;
+	unsigned int nr_running;
+};
+
+
 /*
  * To keep the bandwidth of -deadline tasks under control
  * we need some place where:
@@ -1137,6 +1144,10 @@ struct rq {
 	struct dl_rq		dl;
 #ifdef CONFIG_SCHED_CLASS_EXT
 	struct scx_rq		scx;
+#endif
+
+#ifdef CONFIG_GRR_SCHED
+	struct grr_rq grr;
 #endif
 
 	struct sched_dl_entity	fair_server;
@@ -2618,7 +2629,8 @@ static inline bool task_allowed_on_cpu(struct task_struct *p, int cpu)
 		return false;
 
 	/* Can @cpu run a user thread? */
-	if (!(p->flags & PF_KTHREAD) && !task_cpu_possible(cpu, p))
+	/*if (!(p->flags & PF_KTHREAD) && !task_cpu_possible(cpu, p))<--PREVIOUS IMPLEMENTATION*/
+	if (!(p->flags & PF_KTHREAD) && !cpu_possible(cpu))
 		return false;
 
 	return true;
@@ -4002,5 +4014,16 @@ void sched_enq_and_set_task(struct sched_enq_and_set_ctx *ctx);
 #endif /* CONFIG_SCHED_CLASS_EXT */
 
 #include "ext.h"
+
+/* Declare external symbols needed by other files */
+#ifdef CONFIG_GRR_SCHED
+extern const struct sched_class grr_sched_class;
+extern int grr_cpu_group[NR_CPUS];
+extern int select_task_rq_grr(struct task_struct *p, int cpu, int flags);
+extern void grr_load_balance(struct rq *rq);
+extern void init_grr_rq(struct grr_rq *grr_rq);
+#define GRR_DEFAULT 1
+#define GRR_PERFORMANCE 2
+#endif
 
 #endif /* _KERNEL_SCHED_SCHED_H */
